@@ -6,32 +6,29 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Version = Oxide.Core.VersionNumber;
-
 namespace Oxide.Plugins
 {
-    [Info("UpdateChecker", "LaserHydra", "2.2.1", ResourceId = 681)]
+    [Info("UpdateChecker", "LaserHydra", "2.2.2", ResourceId = 681)]
     [Description("Checks for and notifies of any outdated plugins")]
     public sealed class UpdateChecker : CovalencePlugin
     {
         #region Fields
-
         private const string PluginInformationUrl = "http://oxide.laserhydra.com/plugins/{resourceId}/";
-
+        private const int greenEmbed = 3329330;
+        private const int redEmbed = 13447730;
+        private const string bold = "{bold}";
+        private const string italic = "{italic}";
+        private const string underline = "{underline}";
         [PluginReference]
-        private Plugin EmailAPI, PushAPI;
-
+        private Plugin EmailAPI, PushAPI, DiscordMessages;
         #endregion
-
         #region Hooks
-
         private void Loaded()
         {
             LoadConfig();
-
             timer.Repeat(GetConfig(60f, "Settings", "Auto Check Interval (in Minutes)") * 60, 0, () => CheckForUpdates(null));
             CheckForUpdates(null);
         }
-
         #endregion
 
         #region Loading
@@ -41,7 +38,8 @@ namespace Oxide.Plugins
             SetConfig("Settings", "Auto Check Interval (in Minutes)", 60f);
             SetConfig("Settings", "Use PushAPI", false);
             SetConfig("Settings", "Use EmailAPI", false);
-
+            SetConfig("Settings", "Use DiscordMessages", false);
+            SetConfig("Settings", "Discord Webhook", "");
             SaveConfig();
         }
 
@@ -49,12 +47,16 @@ namespace Oxide.Plugins
         {
             lang.RegisterMessages(new Dictionary<string, string>
             {
-                {"Checking", "Checking for updates... This may take a few seconds. Please be patient."},
-                {"Outdated Plugin List", "Following plugins are outdated:\n{plugins}"},
-                {"Outdated Plugin Info", "# {title} | Installed: {installed} - Latest: {latest} | {url}"},
-                {"Missing ResourceId", "Following plugins are missing their resourceId, and therefor cannot be checked for updates: {plugins}"},
-                {"Resource Unavailable", "Following plugins are not accessable online at the moment, and therefor cannot be checked for updates: {plugins}"},
-                {"Resource Details Unavailable", "Following plugins seem to be using an inproper version name, and therefor cannot be checked for updates: {plugins}"},
+                {"Checking v2", "Checking for updates... This may take a few seconds. Please be patient."},
+                {"Outdated Plugin List v2", "{bold}The following plugins are outdated:{bold}"},
+                {"Outdated Plugin Info Title v2", "# {bold}{title}{bold}"},
+                {"Outdated Plugin Info Body v2", "Installed: {bold}{installed}{bold} - Latest: {bold}{latest}{bold} | {url}"},
+                {"All Checked Plugins Up To Date v2", "{bold}All checked plugins are up to date.{bold}"},
+                {"Failure Plugin List v2", "{bold}The following plugins could not be checked for the following reasons:{bold}"},
+                {"Missing ResourceId v2", "{bold}Missing resource id:{bold}"},
+                {"Resource Unavailable v2", "{bold}Resource unavailable:{bold}"},
+                {"Resource Details Unavailable v2", "{bold}Invalid version name:{bold}"},
+                {"No Failures v2", "{bold}All Addons checked successfully{bold}"},
             }, this);
         }
 
@@ -67,7 +69,7 @@ namespace Oxide.Plugins
         [Command("updates"), Permission("updatechecker.use")]
         private void CmdUpdates(IPlayer player, string cmd, string[] args)
         {
-            SendMessage(player, GetMsg("Checking", player.Id));
+            SendMessage(player, new MessageWrapper(GetMsg("Checking v2", player.Id), greenEmbed));
             CheckForUpdates(player);
         }
 
@@ -75,23 +77,25 @@ namespace Oxide.Plugins
 
         #region Notifications
 
-        private void Notify(IPlayer player, string message)
+        private void Notify(MessageWrapper messageWrapper)
         {
-            if (player == null && GetConfig(false, "Settings", "Use PushAPI"))
-                PushAPI?.Call("PushMessage", "Plugin Update Notification", message);
+            if (GetConfig(false, "Settings", "Use PushAPI"))
+               PushAPI?.Call("PushMessage", "Plugin Update Notification", messageWrapper.GetNoFormatting());
 
-            if (player == null && GetConfig(false, "Settings", "Use EmailAPI"))
-                EmailAPI?.Call("EmailMessage", "Plugin Update Notification", message);
-            
-            SendMessage(player, message);
+            if (GetConfig(false, "Settings", "Use EmailAPI"))
+               EmailAPI?.Call("EmailMessage", "Plugin Update Notification", messageWrapper.GetNoFormatting());
+
+            if (GetConfig(false, "Settings", "Use DiscordMessages") && !string.IsNullOrEmpty(GetConfig("", "Settings", "Discord Webhook"))) 
+               DiscordMessages?.Call("API_SendFancyMessage", GetConfig("", "Settings", "Discord Webhook"), messageWrapper.GetDiscordTitle(), messageWrapper.GetDiscordMessages(), null, messageWrapper.GetColourEmbed());
         }
 
-        private void SendMessage(IPlayer player, string message)
+        private void SendMessage(IPlayer player, MessageWrapper messageWrapper)
         {
             if (player != null)
-                player.Reply(message);
+                player.Reply(messageWrapper.GetNoFormatting());
             else
-                PrintWarning(message);
+                Notify(messageWrapper);
+                PrintWarning(messageWrapper.GetNoFormatting());
         }
 
         #endregion
@@ -155,32 +159,32 @@ namespace Oxide.Plugins
                         // Reached last plugin
                         if (currentPlugin++ >= totalPlugins)
                         {
-                            foreach (var failure in failures)
+                            List<MessageBody> outdatedList = new List<MessageBody>();
+                            foreach (var outdated in outdatedPlugins) 
                             {
-                                if (failure.Value.Count == 0)
-                                    continue;
-
-                                SendMessage(
-                                    requestor, 
-                                    GetMsg(failure.Key, requestor?.Id)
-                                        .Replace("{plugins}", failure.Value.Select(p => p.Name).ToSentence())
-                                );
+                                outdatedList.Add(new MessageBody(GetMsg("Outdated Plugin Info Title v2").Replace("{title}", outdated.Key.Title),
+                                    GetMsg("Outdated Plugin Info Body v2")
+                                    .Replace("{installed}", outdated.Key.Version.ToString())
+                                    .Replace("{latest}", outdated.Value.Version)
+                                    .Replace("{url}", outdated.Value.Url)));
                             }
 
-                            var outdatedPluginText = GetMsg("Outdated Plugin Info");
+                            var outdatedPluginMesageWrapper = outdatedList.Count() > 0 ? new MessageWrapper(GetMsg("Outdated Plugin List v2"), redEmbed) : new MessageWrapper(GetMsg("All Checked Plugins Up To Date v2"), greenEmbed);
+                            outdatedPluginMesageWrapper.AddMessageBodies(outdatedList);
+                                                                           
+                            SendMessage(requestor, outdatedPluginMesageWrapper); 
+                             
+                            List<MessageBody> failureList = new List<MessageBody>();
+                            foreach (var failure in failures) 
+                            {
+                                if (failure.Value.Count > 0)
+                                    failureList.Add(new MessageBody(GetMsg(failure.Key, requestor?.Id), failure.Value.Select(p => p.Name).ToSentence()));
+                            }
 
-                            var outdatedPluginLines = outdatedPlugins.Select(kvp => 
-                                outdatedPluginText
-                                    .Replace("{title}", kvp.Key.Title)
-                                    .Replace("{installed}", kvp.Key.Version.ToString())
-                                    .Replace("{latest}", kvp.Value.Version).Replace("{url}", kvp.Value.Url)
-                            );
+                            var pluginUpdateCheckFailureReasonMessageWrapper = failureList.Count() > 0 ? new MessageWrapper(GetMsg("Failure Plugin List v2"), redEmbed) : new MessageWrapper(GetMsg("No Failures v2"), greenEmbed); 
+                            pluginUpdateCheckFailureReasonMessageWrapper.AddMessageBodies(failureList);
 
-                            SendMessage(
-                                requestor, 
-                                GetMsg("Outdated Plugin List")
-                                    .Replace("{plugins}", string.Join(Environment.NewLine, outdatedPluginLines.ToArray()))
-                            );
+                            SendMessage(requestor, pluginUpdateCheckFailureReasonMessageWrapper);
                         }
 
                     }, this);
@@ -266,6 +270,119 @@ namespace Oxide.Plugins
                 public string Version => _version;
                 public string Developer => _developer;
                 public string Url => _url;
+            }
+        }
+
+        private class MessageWrapper
+        {
+            public string Title { get; private set; }
+            public int Colour { get; private set; }
+            public List<MessageBody> Messages { get; private set; }
+
+            public MessageWrapper(string title, int colour) 
+            {
+                this.Title = title;
+                this.Colour = colour;
+                this.Messages = new List<MessageBody>();
+            }
+
+            public string GetDiscordMessages() 
+            {
+                List<DiscordMessage> discordMessage = new List<DiscordMessage>();
+                
+                foreach (var message in this.Messages) 
+                {
+                    discordMessage.Add(new DiscordMessage(format(message.Title, MessageTarget.DISCORD), format(message.Message, MessageTarget.DISCORD), false));
+                }
+            
+                return JsonConvert.SerializeObject(discordMessage);
+            }
+
+            public string GetDiscordTitle() {
+                return format(Title, MessageTarget.DISCORD);
+            }
+
+            public int GetColourEmbed() {
+                return Colour;
+            }
+
+            public string GetNoFormatting() 
+            {
+
+                string formattedMessage = $"{format(Title)}\n";
+                foreach (var messageBody in Messages) {
+                  formattedMessage += $"{format(messageBody.Title)} {format(messageBody.Message)}\n";
+                }
+
+                return formattedMessage;
+            }
+
+            public void AddMessageBody(MessageBody messageBody)
+            {
+                Messages.Add(messageBody);
+            }
+
+            public void AddMessageBodies(List<MessageBody> messageBodies)
+            {
+                Messages.AddRange(messageBodies);
+            }
+
+            private string format(string text) 
+            {
+                return format(text, MessageTarget.DEFAULT);
+            }
+
+            private string format(string text, MessageTarget messageTarget) 
+            {
+                return text.Replace(bold, messageTarget.Bold)
+                           .Replace(italic, messageTarget.Italic)
+                           .Replace(underline, messageTarget.Underline);
+            }
+        }
+
+        private class MessageBody {
+
+            public string Title { get; private set; }
+            public string Message { get; private set; }
+
+            public MessageBody(string title, string message) 
+            {
+                this.Title = title;
+                this.Message = message; 
+            }
+        }
+
+        private class DiscordMessage {
+
+            [JsonProperty("name")]
+            public string Name { get; private set; }
+            [JsonProperty("value")]
+            public string Dvalue { get; private set; }
+            [JsonProperty("inline")]
+            public bool Inline { get; private set; }
+
+            public DiscordMessage(string name, string dValue, bool inline) 
+            {
+                this.Name = name;
+                this.Dvalue = dValue; 
+                this.Inline = inline;
+            }
+        }
+
+        private class MessageTarget {
+            public static readonly MessageTarget DEFAULT = new MessageTarget("", "", "");
+            public static readonly MessageTarget DISCORD = new MessageTarget("**", "_", "__");
+            public static readonly MessageTarget EMAIL = new MessageTarget("", "", "");
+            public static readonly MessageTarget PUSH = new MessageTarget("", "", "");
+
+            public string Bold { get; private set; }
+            public string Italic { get; private set; }
+            public string Underline { get; private set; }
+
+            public MessageTarget(string bold, string italic, string underline) {
+                this.Bold = bold;
+                this.Italic = italic;
+                this.Underline = underline;
             }
         }
 
