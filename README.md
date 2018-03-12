@@ -1,4 +1,4 @@
-**Update Checker** automatically checks all supported Oxide plugins for updates on server start or on command. This is useful to see if you are using an outdated, older versions of plugins. It will also automatically check for updates every hour, or at the time configured. Update Checker also supports the Email API and Push API plugins for instant notifications.
+**Update Checker** automatically checks all supported Oxide plugins for updates on server start or on command. This is useful to see if you are using an outdated, older versions of plugins. It will also automatically check for updates every hour, or at the time configured. Update Checker also supports the Email API, DiscordMessages API, and Push API plugins for instant notifications.
 
 ## Permissions
 
@@ -15,7 +15,9 @@
   "Settings": {
     "Auto Check Interval (in Minutes)": 60.0,
     "Use EmailAPI": false,
-    "Use PushAPI": false
+    "Use PushAPI": false,
+    "Discord Webhook": "",
+    "Use DiscordMessages": true,
   }
 }
 ```
@@ -25,12 +27,20 @@ The configuration file will update automatically if new options are added or rem
 ## Localization
 
 The default messages are in the `UpdateChecker.json` file under the `oxide/lang/en directory`. To add support for another language, create a new language folder (ex. de for German) if not already created, copy the default language file to the new folder, and then customize the messages.
+{bold}, {italic} and {underline} tags may be used for discord formatting; for other message targets, they are unsupported and will stripped out from the response.
 
 ```json
 {
-  "No Permission": "Following plugins are outdated: {plugins}",
-  "Outdated Plugin List": "Following plugins are outdated: {plugins}",
-  "Outdated Plugin Info": "# {title} | Installed: {installed} - Latest: {latest} | {url}"
+  "Checking v2": "Checking for updates... This may take a few seconds. Please be patient.",
+  "Outdated Plugin List v2": "{bold}The following plugins are outdated:{bold}",
+  "Outdated Plugin Info Title v2": "# {bold}{title}{bold}",
+  "Outdated Plugin Info Body v2": "Installed: {bold}{installed}{bold} - Latest: {bold}{latest}{bold} | {url}",
+  "All Checked Plugins Up To Date v2": "{bold}All checked plugins are up to date.{bold}",
+  "Failure Plugin List v2": "{bold}The following plugins could not be checked for the following reasons:{bold}",
+  "Missing ResourceId v2": "{bold}Missing resource id:{bold}",
+  "Resource Unavailable v2": "{bold}Resource unavailable:{bold}",
+  "Resource Details Unavailable v2": "{bold}Invalid version name:{bold}",
+  "No Failures v2": "{bold}All Addons checked successfully{bold}"
 }
 ```
 
